@@ -1,0 +1,163 @@
+Jordan Insinger
+Teammate: Liam Mckenna
+EEL5733 - Advanced Systems Programming
+28 January, 2026
+
+In Class Assignment: Shell Simulator
+
+case 1: $ prog args > file
+---------------------
+switch(Fork())
+	
+	case: child process
+		int fd = open(file);
+		int newfd = dup2(fd, stdout_fileno);
+	
+		if (newfd == -1) // error
+		close(fd);
+
+		execv(prog, args);
+		return -1;
+
+
+	case: parent process 
+		wait(NULL)
+		return 0;
+
+	default:
+		return -1;
+
+---------------
+case 2: $ prog args < file
+
+switch(Fork())
+
+	case: child process
+		int fd = open(file);
+
+		int newfd = dup2(fd, stdin_fileno);
+		
+		if (newfd == -1) // error
+		close(fd);
+
+		execv(prog, args);
+		return -1;
+
+	case: parent process
+		wait(NULL);
+		return 0;
+
+	default: 
+		return -1;
+
+------------
+case 3: $ prog1 args1 | prog2 args2
+
+int pfd[2];
+
+pid = fork()
+
+	case: child process
+		close(pipe[0])	
+		dup2(pfd[1], stdout_fileno);
+		execv(prog1, args1);
+
+	case: parent process 
+		break;
+
+	default errExit();
+
+pid = fork()
+
+	case: child process 
+		close(pipe[1])	
+		dup2(pfd[0], stdout_fileno);
+		execv(prog2, args2);
+
+	case: parent process
+		break;	
+
+	default: errExit();
+
+
+close(pfd[0]);
+close(pfd[1]);
+wait(NULL);
+wait(NULL);
+exit(EXIT_SUCCESS)
+
+-----------------
+case 4: $ prog1 args1 ; prog2 args2
+
+switch fork()
+	case child:
+		execv(prog1, args1);
+	case parent:
+		wait(NULL);
+		break;
+	case error:
+		errExit();
+
+switch fork()
+	case child:
+		execv(prog2, args2);
+	case parent:
+		wait(NULL);
+		break;
+	case error:
+		errExit();	
+
+exit(EXIT_SUCCESS);
+
+
+---------
+case 5: $ prog1 args1 && prog2 args2
+
+int status;
+
+switch fork(): 
+	case child:
+		execv(prog1, args1);
+	case parent:
+		waitpid(childpid, &status, 0);
+		break;
+
+if (WIFEXITED(status) != 0) {
+	errExit();	
+}
+
+switch fork():
+	case child:
+		execv(prog2, args2);
+	case parent:
+		break;
+	case error:
+		errExit();
+
+exit(EXIT_SUCCESS)
+
+---------
+case 6: $ prog1 args1 || prog2 args2
+
+int status;
+
+switch fork(): 
+	case child:
+		execv(prog1, args1);
+	case parent:
+		waitpid(childpid, &status, 0);
+		break;
+
+if (WIFEXITED(status) == 0) {
+	errExit();	
+}
+
+switch fork():
+	case child:
+		execv(prog2, args2);
+	case parent:
+		break;
+	case error:
+		errExit();
+
+exit(EXIT_SUCCESS)
