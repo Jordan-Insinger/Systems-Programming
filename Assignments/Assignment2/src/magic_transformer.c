@@ -16,25 +16,51 @@
 #include <string.h>
 #include <pthread.h>
 
-#define BUF_SIZE 5
+#define BUF_SIZE 3
+
+typedef struct {
+	char agent_name[20];
+	char agent_id[10];
+	char loss_gain[32]; 
+	double loss_gain_d;
+}Agent;
+
+typedef struct {
+	char location[3];
+	char loss_gain[32];
+	double loss_gain_d;
+}State;
+
+typedef struct {
+	char (*functionality)[32];
+	char (*stream)[12];
+	int count;
+}ThreadArgs;
 
 static pthread_mutex_t mtx_1 = PTHREAD_MUTEX_INITIALIZER;
 static pthread_mutex_t mtx_2 = PTHREAD_MUTEX_INITIALIZER;
-static pthread_cond_t empty_cond = PTHREAD_COND_INITIALIZER;
-static pthread_cond_t full_cond = PTHREAD_COND_INITIALIZER;
+static pthread_cond_t empty_cond_1 = PTHREAD_COND_INITIALIZER;
+static pthread_cond_t empty_cond_2 = PTHREAD_COND_INITIALIZER;
+static pthread_cond_t full_cond_1 = PTHREAD_COND_INITIALIZER;
+static pthread_cond_t full_cond_2 = PTHREAD_COND_INITIALIZER;
 
 static char *buffer_1[BUF_SIZE];
 static char *buffer_2[BUF_SIZE];
-static int num_items = 0;
+static int num_items_1 = 0;
+static int num_items_2 = 0;
+static int in_1 = 0;
+static int in_2 = 0;
+static int out_1 = 0;
+static int out_2 = 0;
 
 void parse_arguments(int argc, char *argv[], char functionality[][32], char stream[][12]);
 void read_price(char *buf, char **s, char **price);
 void read_rating(char *buf, char *s, char *rating);
 void format_price(char *price);
 
-void *transformer1();
-void *transformer2();
-void *transformer3();
+void *transformer1(void *args);
+void *transformer2(void *args);
+void *transformer3(void *args);
 
 int main(int argc, char **argv) {
 
@@ -53,19 +79,22 @@ int main(int argc, char **argv) {
 	pthread_attr_init(&thread_attributes);
 	pthread_attr_setdetachstate(&thread_attributes, PTHREAD_CREATE_JOINABLE);
 
-	
-
 	// parse arguments
 	parse_arguments(argc, argv, functionality, stream);
 
+	ThreadArgs thread_args;
+	thread_args.count = argc-1;
+	thread_args.functionality = functionality;
+	thread_args.stream = stream;
+
 	// create thread 1 to execute transformer 1
-	pthread_create(&threads[0], &thread_attributes, transformer1, NULL);
+	pthread_create(&threads[0], &thread_attributes, transformer1, &thread_args);
 
 	// create thread 2 to execute transformer 2
-	pthread_create(&threads[1], &thread_attributes, transformer2, NULL);
+	pthread_create(&threads[1], &thread_attributes, transformer2, &thread_args);
 
 	// create thread 3 to execute transformer 3
-	pthread_create(&threads[2], &thread_attributes, transformer3, NULL);
+	pthread_create(&threads[2], &thread_attributes, transformer3, &thread_args);
 
 	for (int i = 0; i < 3; i++) {
 		pthread_join(threads[i], NULL);
@@ -76,9 +105,7 @@ int main(int argc, char **argv) {
 
 
 
-void *transformer1() {
-	fprintf(stdout, "thread1 created\n");
-
+void *transformer1(void *args) {
 	char *agent_name = malloc(10 * sizeof(char));
 	char *agent_id = malloc(5 * sizeof(char));
 	char *transaction_id = malloc(10 * sizeof(char));
@@ -158,64 +185,315 @@ void *transformer1() {
 		else format_price(sale_price);
 
 		// output to stdout
-		char performance_data[256];
-		char rating_data[128];
+		char *performance_data = malloc(256 * sizeof(char));
+		char *rating_data = malloc(128 * sizeof(char));
 
 		// format into performance and rating data respectively
-		snprintf(performance_data, sizeof(performance_data), "%s, %s, %s, %s, %s, %s\n",agent_name, agent_id, transaction_id, location, sale_price, loss_gain);
-		snprintf(rating_data, sizeof(rating_data), "%s, %s, %s\n", agent_id, location, customer_rating);
+		snprintf(performance_data, 256, "%s, %s, %s, %s, %s, %s\n",agent_name, agent_id, transaction_id, location, sale_price, loss_gain);
+		snprintf(rating_data, 128, "%s, %s, %s\n", agent_id, location, customer_rating);
 
 		// ============ CRITICAL REGION ==============
 		pthread_mutex_lock(&mtx_1); // lock mutex 1
 
-		while (num_items == BUF_SIZE) { // check and wait on full condition
-			pthread_cond_wait(&full_cond, &mtx_1);
+		while (num_items_1 == BUF_SIZE) { // check and wait on full condition
+			pthread_cond_wait(&full_cond_1, &mtx_1);
 		}
 
-		buffer_1[num_items] = performance_data; // write to buffer 1
-		num_items++;
+		buffer_1[in_1] = performance_data; // write to buffer 1
+		in_1 = (in_1 + 1) % BUF_SIZE;
+		num_items_1++;
 
-		if (num_items == 1)
-			pthread_cond_signal(&empty_cond); // signal condition variable
+		if (num_items_1 == 1)
+			pthread_cond_signal(&empty_cond_1); // signal condition variable
 
 		pthread_mutex_unlock(&mtx_1); // unlock mutex 1
 		// ===========================================
+
+		// ============ CRITICAL REGION 2==============
+		pthread_mutex_lock(&mtx_2); // lock mutex 2
+
+		while (num_items_2 == BUF_SIZE) { // check and wait on full condition
+			pthread_cond_wait(&full_cond_2, &mtx_2);
+		}
+
+		buffer_2[in_2] = rating_data; // write to buffer 1
+		in_2 = (in_2 + 1) % BUF_SIZE;
+		num_items_2++;
+
+		if (num_items_2 == 1)
+			pthread_cond_signal(&empty_cond_2); // signal condition variable
+
+		pthread_mutex_unlock(&mtx_2); // unlock mutex 1
+		// ===========================================
 	}
+
+	// send EOF signal
+	pthread_mutex_lock(&mtx_1);
+
+	while (num_items_1 == BUF_SIZE) { // check and wait on full condition
+		pthread_cond_wait(&full_cond_1, &mtx_1);
+	}
+
+	buffer_1[in_1] = NULL;
+	num_items_1++;
+
+	if (num_items_1 == 1)
+		pthread_cond_signal(&empty_cond_1); // signal condition variable
+
+	pthread_mutex_unlock(&mtx_1);
 	
-	// lock mutex 2
-	// check full condition variable in while loop
-	// condition wait if not ready
-	// write to buffer 2
-	// signal empty condition variable
-	// unlock mutex 2
-	
+	// send EOF signal 2
+	pthread_mutex_lock(&mtx_2);
+
+	while (num_items_2 == BUF_SIZE) { // check and wait on full condition
+		pthread_cond_wait(&full_cond_2, &mtx_2);
+	}
+
+	buffer_2[in_2] = NULL;
+	num_items_2++;
+
+	if (num_items_2 == 1)
+		pthread_cond_signal(&empty_cond_2); // signal condition variable
+
+	pthread_mutex_unlock(&mtx_2);
+
 	pthread_exit(NULL);
 }
 
-void *transformer2() {
-	fprintf(stdout, "thread2 created\n");
+void *transformer2(void *args) {
+
+	ThreadArgs *thread_args = (ThreadArgs *)args;
+
+	// first, determine functionality -> stream mappings
+	int agent_perf_request = 0;  // 0: not requested, 1: stdout, 2: stderr
+	int state_perf_request = 0;  // 0: not requested, 1: stdout, 2: stderr
+
+	for (int i = 0; i < thread_args->count; i++) {
+		if (strcmp(thread_args->functionality[i], "agent_performance") == 0) {
+			agent_perf_request = (strcmp(thread_args->stream[i], "stdout") == 0) ? 1 : 2;
+		}
+		else if (strcmp(thread_args->functionality[i], "state_performance") == 0) {
+			state_perf_request = (strcmp(thread_args->stream[i], "stdout") == 0) ? 1 : 2;
+		}
+	}
+
+	int devnull = open("/dev/null", O_WRONLY);
+	int saved_stdout = dup(STDOUT_FILENO);
+	int saved_stderr = dup(STDERR_FILENO);
+
+	if (agent_perf_request == 0) {
+		dup2(devnull, STDOUT_FILENO);
+	} else if (agent_perf_request == 2) {
+		dup2(saved_stderr, STDOUT_FILENO);
+	}
+
+	if (state_perf_request == 0) {
+		dup2(devnull, STDERR_FILENO);
+	} else if (state_perf_request == 1) {
+		dup2(saved_stdout, STDERR_FILENO);
+	}
+
+	close(saved_stdout);
+	close(saved_stderr);
+	//close(devnull);
+	
+	int comma_count;
+	char *agent_name = malloc(10 * sizeof(char));
+	char *agent_id = malloc(5 * sizeof(char));
+	char *transaction_id = malloc(10 * sizeof(char));
+	char *location = malloc(2 * sizeof(char));
+	char *sale_price = malloc(14*sizeof(char));
+	char *loss_gain = malloc(32*sizeof(char));
+	Agent *agents = NULL;
+	State *states = NULL;
+	int agent_capacity = 0;
+	int agent_count = 0;
+	int state_count = 0;
+	int state_capacity = 0;
+	char buf[2048];
+	char fields[6][20];
 
 	for (;;) {
 		pthread_mutex_lock(&mtx_1); // lock mutex 
 
-		while (num_items == 0) {
-			pthread_cond_wait(&empty_cond, &mtx_1);
+		while (num_items_1 == 0) {
+			pthread_cond_wait(&empty_cond_1, &mtx_1);
 		}
 
-		fprintf(stdout, "%s", buffer_1[num_items-1]);
-		num_items--;
+		char *data = buffer_1[out_1];
 
-		if (num_items == BUF_SIZE - 1)
-			pthread_cond_signal(&full_cond);
+		if (data == NULL) break; // EOF signal
+					 //
+		char local_data[256];
+		strcpy(local_data, data);
+		free(data);
+
+		out_1 = (out_1 + 1) % BUF_SIZE;
+		num_items_1--;
+
+		if (num_items_1 == BUF_SIZE - 1)
+			pthread_cond_signal(&full_cond_1);
 
 		pthread_mutex_unlock(&mtx_1);
+
+		// RUN TRANSFORMER 2 OPERATIONS
+		char *s = NULL;
+
+		int fields_idx = 0;
+		int char_idx = 0;
+		int comma_cnt = 0;
+		s = local_data;
+		
+		while (comma_cnt < 4) {
+			if (*s == ',') {
+				fields[fields_idx][char_idx] = '\0';
+
+				fields_idx++;
+				comma_cnt++;
+				char_idx = 0;
+				s++;
+				
+			}
+			else {
+				fields[fields_idx][char_idx] = *s;
+				char_idx++;
+
+			}
+			s++;
+		}
+
+		agent_name = fields[0];
+		agent_id = fields[1];
+		transaction_id = fields[2];
+		location = fields[3];
+
+		read_price(local_data, &s, &sale_price);
+		format_price(sale_price);
+
+		// store loss/gain so I don't have to reformat after comparisons
+		char temp_loss_gain[32];
+		if (*s == '+') s++;
+		strcpy(temp_loss_gain, s);
+		read_price(local_data, &s, &loss_gain);
+
+		char *endptr;
+		double loss_gain_d = strtod(temp_loss_gain, &endptr);
+		
+		// add state to struct
+		int found = -1;
+		for (int i = 0; i < state_count; i++) {
+			if  (strcmp(states[i].location, location) == 0) {
+				found = i;
+				break;
+			}
+		}
+
+		// state found, compare earnings
+		if (found != -1) {
+			if (fabs(states[found].loss_gain_d) < fabs(loss_gain_d)) {
+				states[found].loss_gain_d = loss_gain_d;
+				strcpy(states[found].loss_gain, temp_loss_gain);
+			}
+		}
+
+		// otherwise add to struct
+		else {
+			if (state_count >= state_capacity) { // increase state_capacity
+				state_capacity = (state_capacity == 0) ? 10 : state_capacity * 2;
+				states = realloc(states, state_capacity * sizeof(State));
+
+				if (states == NULL) {
+					fprintf(stderr, "Memory allocation failed\n");
+					exit(1);
+				}
+
+			}
+			// place in struct
+			strcpy(states[state_count].location, location);
+			strcpy(states[state_count].loss_gain, temp_loss_gain);
+			states[state_count].loss_gain_d = loss_gain_d;
+			state_count++;
+		}
+
+
+		found = -1;
+		// add agent to struct
+		for (int i = 0; i < agent_count; i++) { // check if agent exists
+			if(strcmp(agents[i].agent_name, agent_name) == 0) {
+				found = i;
+				break;
+			}
+		}
+
+		// agent found - compare loss/gain
+		if (found != -1) {
+			if (fabs(agents[found].loss_gain_d) < fabs(loss_gain_d)) {
+				agents[found].loss_gain_d = loss_gain_d;
+				strcpy(agents[found].loss_gain, temp_loss_gain);
+			}
+		}
+		
+		else { // agent not found check if we have space to insert
+
+			if (agent_count >= agent_capacity) { // increase agent_capacity
+				agent_capacity = (agent_capacity == 0) ? 10 : agent_capacity * 2;
+				agents = realloc(agents, agent_capacity * sizeof(Agent));
+
+				if (agents == NULL) {
+					fprintf(stdout, "Memory allocation failed\n");
+					exit(1);
+				}
+
+			}
+			// place in struct
+			strcpy(agents[agent_count].agent_name, agent_name);
+			strcpy(agents[agent_count].agent_id, agent_id);
+			agents[agent_count].loss_gain_d = loss_gain_d;
+			strcpy(agents[agent_count].loss_gain, temp_loss_gain);
+			agent_count++;
+		}
 	}
 
+	for (int i = 0; i < agent_count; i++) {
+		fprintf(stdout, "%s, %s, %s", agents[i].agent_name, agents[i].agent_id, agents[i].loss_gain);
+	}
+	fflush(stdout);
+
+	for (int i = 0; i < state_count; i++) {
+		fprintf(stderr, "%s, %s", states[i].location, states[i].loss_gain);
+	}
+	fflush(stderr);
+	free(agents);
+	free(states);
 	pthread_exit(NULL);
 }
 
-void *transformer3() {
-	fprintf(stdout, "thread3 created\n");
+void *transformer3(void *args) {
+
+	for (;;) {
+		pthread_mutex_lock(&mtx_2); // lock mutex 
+
+		while (num_items_2 == 0) {
+			pthread_cond_wait(&empty_cond_2, &mtx_2);
+		}
+
+		char *data = buffer_2[out_2];
+
+		if (data == NULL) break; // EOF signal
+
+		// RUN TRANSFORMER 2 OPERATIONS
+		//fprintf(stderr, "%s", data);
+
+		
+		free(data);
+		out_2 = (out_2 + 1) % BUF_SIZE;
+		num_items_2--;
+
+		if (num_items_2 == BUF_SIZE - 1)
+			pthread_cond_signal(&full_cond_2);
+
+		pthread_mutex_unlock(&mtx_2);
+	}
 	pthread_exit(NULL);
 }
 
@@ -234,11 +512,11 @@ void parse_arguments(int argc, char *argv[], char functionality[][32], char stre
 		
 		// grab length of functionality and copy
 		func_len = colon_ptr - argv[i];
-		strncpy(stream[i-1], argv[i], func_len);
+		strncpy(functionality[i-1], argv[i], func_len);
 		functionality[i-1][func_len] = '\0';
 		
 		// copy stream after colon, already null terminated
-		strcpy(functionality[i-1], colon_ptr + 1);
+		strcpy(stream[i-1], colon_ptr + 1);
 	}
 }
 
@@ -251,6 +529,9 @@ void read_price(char *buf, char **s, char **price) {
 		(*price)[1] = '\0';
 		(*s) += 3;  
 	}
+	else if (**s == '+') (*s)++;
+	else if (**s == '-') (*s)++;
+
 	else {
 		// otherwise, read until decimal
 		while (**s != '.') {
@@ -304,6 +585,8 @@ void format_price(char *price) {
     int price_len = strlen(price);
     int digits_before_decimal = price_len - 3; 
     
+    if (strcmp(price, "0.00") == 0) return;
+
     if (digits_before_decimal <= 3) {
         return;  
     }
