@@ -192,7 +192,7 @@ void *transformer1(void *args) {
 		snprintf(performance_data, 256, "%s, %s, %s, %s, %s, %s\n",agent_name, agent_id, transaction_id, location, sale_price, loss_gain);
 		snprintf(rating_data, 128, "%s, %s, %s\n", agent_id, location, customer_rating);
 
-		// ============ CRITICAL REGION ==============
+		// ============ CRITICAL REGION 1==============
 		pthread_mutex_lock(&mtx_1); // lock mutex 1
 
 		while (num_items_1 == BUF_SIZE) { // check and wait on full condition
@@ -216,14 +216,14 @@ void *transformer1(void *args) {
 			pthread_cond_wait(&full_cond_2, &mtx_2);
 		}
 
-		buffer_2[in_2] = rating_data; // write to buffer 1
+		buffer_2[in_2] = rating_data; // write to buffer 2
 		in_2 = (in_2 + 1) % BUF_SIZE;
 		num_items_2++;
 
 		if (num_items_2 == 1)
 			pthread_cond_signal(&empty_cond_2); // signal condition variable
 
-		pthread_mutex_unlock(&mtx_2); // unlock mutex 1
+		pthread_mutex_unlock(&mtx_2); // unlock mutex 2
 		// ===========================================
 	}
 
@@ -470,6 +470,20 @@ void *transformer2(void *args) {
 
 void *transformer3(void *args) {
 
+	int comma_count;
+	char *agent_id = malloc(5 * sizeof(char));
+	char *location = malloc(2 * sizeof(char));
+	char *rating = malloc(3*sizeof(char));
+	int agent_capacity = 0;
+	int agent_count = 0;
+	int state_count = 0;
+	int state_capacity = 0;
+	Agent *agents = NULL;
+	State *states = NULL;
+	char buf[2048];
+	char fields[3][20];
+
+	char *s = NULL;
 	for (;;) {
 		pthread_mutex_lock(&mtx_2); // lock mutex 
 
@@ -481,11 +495,10 @@ void *transformer3(void *args) {
 
 		if (data == NULL) break; // EOF signal
 
-		// RUN TRANSFORMER 2 OPERATIONS
-		//fprintf(stderr, "%s", data);
-
-		
+		char local_data[256];
+		strcpy(local_data, data);
 		free(data);
+		
 		out_2 = (out_2 + 1) % BUF_SIZE;
 		num_items_2--;
 
@@ -493,6 +506,8 @@ void *transformer3(void *args) {
 			pthread_cond_signal(&full_cond_2);
 
 		pthread_mutex_unlock(&mtx_2);
+
+		// RUN TRANSFORMER 2 OPERATIONS
 	}
 	pthread_exit(NULL);
 }
