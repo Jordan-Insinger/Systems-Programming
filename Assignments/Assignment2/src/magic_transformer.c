@@ -16,19 +16,23 @@
 #include <string.h>
 #include <pthread.h>
 
-#define BUF_SIZE 3
+#define BUF_SIZE 5
 
 typedef struct {
 	char agent_name[20];
 	char agent_id[10];
 	char loss_gain[32]; 
+	char rating[5];
 	double loss_gain_d;
+	double rating_d;
 }Agent;
 
 typedef struct {
 	char location[3];
 	char loss_gain[32];
+	char rating[5];
 	double loss_gain_d;
+	double rating_d;
 }State;
 
 typedef struct {
@@ -198,7 +202,6 @@ void *transformer1(void *args) {
 		while (num_items_1 == BUF_SIZE) { // check and wait on full condition
 			pthread_cond_wait(&full_cond_1, &mtx_1);
 		}
-
 		buffer_1[in_1] = performance_data; // write to buffer 1
 		in_1 = (in_1 + 1) % BUF_SIZE;
 		num_items_1++;
@@ -276,26 +279,6 @@ void *transformer2(void *args) {
 			state_perf_request = (strcmp(thread_args->stream[i], "stdout") == 0) ? 1 : 2;
 		}
 	}
-
-	int devnull = open("/dev/null", O_WRONLY);
-	int saved_stdout = dup(STDOUT_FILENO);
-	int saved_stderr = dup(STDERR_FILENO);
-
-	if (agent_perf_request == 0) {
-		dup2(devnull, STDOUT_FILENO);
-	} else if (agent_perf_request == 2) {
-		dup2(saved_stderr, STDOUT_FILENO);
-	}
-
-	if (state_perf_request == 0) {
-		dup2(devnull, STDERR_FILENO);
-	} else if (state_perf_request == 1) {
-		dup2(saved_stdout, STDERR_FILENO);
-	}
-
-	close(saved_stdout);
-	close(saved_stderr);
-	//close(devnull);
 	
 	int comma_count;
 	char *agent_name = malloc(10 * sizeof(char));
@@ -454,21 +437,59 @@ void *transformer2(void *args) {
 		}
 	}
 
-	for (int i = 0; i < agent_count; i++) {
-		fprintf(stdout, "%s, %s, %s", agents[i].agent_name, agents[i].agent_id, agents[i].loss_gain);
+	if (agent_perf_request != 0) {
+		if (agent_perf_request == 1) {
+			for (int i = 0; i < agent_count; i++) {
+				fprintf(stdout, "%s, %s, %s", agents[i].agent_name, agents[i].agent_id, agents[i].loss_gain);
+			}
+
+		}
+		else if (agent_perf_request == 2) {
+			for (int i = 0; i < agent_count; i++) {
+				fprintf(stderr, "%s, %s, %s", agents[i].agent_name, agents[i].agent_id, agents[i].loss_gain);
+			}
+		}
 	}
 	fflush(stdout);
-
-	for (int i = 0; i < state_count; i++) {
-		fprintf(stderr, "%s, %s", states[i].location, states[i].loss_gain);
-	}
 	fflush(stderr);
+
+	if (state_perf_request != 0) {
+		if (state_perf_request == 1) {
+			for (int i = 0; i < state_count; i++) {
+				fprintf(stdout, "%s, %s", states[i].location, states[i].loss_gain);
+			}
+		}
+		else if (state_perf_request == 2) {
+			for (int i = 0; i < state_count; i++) {
+				fprintf(stderr, "%s, %s", states[i].location, states[i].loss_gain);
+			}
+		}
+	}
+	fflush(stdout);
+	fflush(stderr);
+
 	free(agents);
 	free(states);
 	pthread_exit(NULL);
 }
 
 void *transformer3(void *args) {
+
+	ThreadArgs *thread_args = (ThreadArgs *)args;
+
+	// first, determine functionality -> stream mappings
+	int agent_rating_request = 0;  // 0: not requested, 1: stdout, 2: stderr
+	int state_rating_request = 0;  // 0: not requested, 1: stdout, 2: stderr
+
+	for (int i = 0; i < thread_args->count; i++) {
+		if (strcmp(thread_args->functionality[i], "agent_rating") == 0) {
+			agent_rating_request = (strcmp(thread_args->stream[i], "stdout") == 0) ? 1 : 2;
+		}
+		else if (strcmp(thread_args->functionality[i], "state_rating") == 0) {
+			state_rating_request = (strcmp(thread_args->stream[i], "stdout") == 0) ? 1 : 2;
+		}
+	}
+
 
 	int comma_count;
 	char *agent_id = malloc(5 * sizeof(char));
@@ -482,8 +503,11 @@ void *transformer3(void *args) {
 	State *states = NULL;
 	char buf[2048];
 	char fields[3][20];
-
+	int fields_idx = 0;
+	int char_idx = 0;
+	int comma_cnt = 0;
 	char *s = NULL;
+
 	for (;;) {
 		pthread_mutex_lock(&mtx_2); // lock mutex 
 
@@ -507,8 +531,149 @@ void *transformer3(void *args) {
 
 		pthread_mutex_unlock(&mtx_2);
 
-		// RUN TRANSFORMER 2 OPERATIONS
+		fields_idx = 0;
+		char_idx = 0;
+		comma_cnt = 0;
+		s = local_data;
+
+		while (comma_cnt < 2) {
+			if (*s == ',') {
+				fields[fields_idx][char_idx] = '\0';
+
+				fields_idx++;
+				comma_cnt++;
+				char_idx = 0;
+				s++;
+				
+			}
+			else {
+				fields[fields_idx][char_idx] = *s;
+				char_idx++;
+
+			}
+			s++;
+		}
+
+		agent_id = fields[0];
+		location = fields[1];
+
+
+		// store loss/gain so I don't have to reformat after comparisons
+		char temp_rating[5];
+		strcpy(temp_rating, s);
+		read_rating(local_data, s, rating);
+
+		char *endptr;
+		double rating_d = strtod(rating, &endptr);
+
+
+		// add state to struct
+		int found = -1;
+		for (int i = 0; i < state_count; i++) {
+			if  (strcmp(states[i].location, location) == 0) {
+				found = i;
+				break;
+			}
+		}
+
+		// state found, compare earnings
+		if (found != -1) {
+			if (fabs(states[found].rating_d) < fabs(rating_d)) {
+				states[found].rating_d = rating_d;
+				strcpy(states[found].rating, temp_rating);
+			}
+		}
+
+		// otherwise add to struct
+		else {
+			if (state_count >= state_capacity) { // increase state_capacity
+				state_capacity = (state_capacity == 0) ? 10 : state_capacity * 2;
+				states = realloc(states, state_capacity * sizeof(State));
+
+				if (states == NULL) {
+					fprintf(stderr, "Memory allocation failed\n");
+					exit(1);
+				}
+
+			}
+			// place in struct
+			strcpy(states[state_count].location, location);
+			strcpy(states[state_count].rating, temp_rating);
+			states[state_count].rating_d = rating_d;
+			state_count++;
+		}
+
+
+		found = -1;
+		// add agent to struct
+		for (int i = 0; i < agent_count; i++) { // check if agent exists
+			if(strcmp(agents[i].agent_id, agent_id) == 0) {
+				found = i;
+				break;
+			}
+		}
+
+		// agent found - compare loss/gain
+		if (found != -1) {
+			if (fabs(agents[found].rating_d) < fabs(rating_d)) {
+				agents[found].rating_d = rating_d;
+				strcpy(agents[found].rating, temp_rating);
+			}
+		}
+		
+		else { // agent not found check if we have space to insert
+
+			if (agent_count >= agent_capacity) { // increase agent_capacity
+				agent_capacity = (agent_capacity == 0) ? 10 : agent_capacity * 2;
+				agents = realloc(agents, agent_capacity * sizeof(Agent));
+
+				if (agents == NULL) {
+					fprintf(stdout, "Memory allocation failed\n");
+					exit(1);
+				}
+
+			}
+			// place in struct
+			strcpy(agents[agent_count].agent_id, agent_id);
+			agents[agent_count].rating_d = rating_d;
+			strcpy(agents[agent_count].rating, temp_rating);
+			agent_count++;
+		}
 	}
+
+	if (agent_rating_request != 0) {
+		if (agent_rating_request == 1) {
+			for (int i = 0; i < agent_count; i++) {
+				fprintf(stdout, "%s, %s",  agents[i].agent_id, agents[i].rating);
+			}
+		}
+		else if (agent_rating_request == 2) {
+			for (int i = 0; i < agent_count; i++) {
+				fprintf(stderr, "%s, %s",  agents[i].agent_id, agents[i].rating);
+			}
+		}
+	}
+	fflush(stdout);
+	fflush(stderr);
+
+	if (state_rating_request != 0) {
+		if (state_rating_request == 1) {
+			for (int i = 0; i < state_count; i++) {
+				fprintf(stdout, "%s, %s", states[i].location, states[i].rating);
+			}
+		}
+		else if (state_rating_request == 2) {
+			for (int i = 0; i < state_count; i++) {
+				fprintf(stderr, "%s, %s", states[i].location, states[i].rating);
+			}
+		}
+	}
+	fflush(stdout);
+	fflush(stderr);
+
+	free(agents);
+	free(states);
+	
 	pthread_exit(NULL);
 }
 
