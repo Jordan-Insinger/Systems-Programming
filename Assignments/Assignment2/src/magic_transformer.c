@@ -68,23 +68,21 @@ void *transformer3(void *args);
 
 int main(int argc, char **argv) {
 
-
 	if (argc == 1) {
 		fprintf(stdout, "No output requested, have a nice day!\n");
 		return 0;
 	}
 	
-
 	char functionality[argc-1][32];
 	char stream[argc-1][12];
+
+	// parse arguments
+	parse_arguments(argc, argv, functionality, stream);
 
 	pthread_t threads[3];
 	pthread_attr_t thread_attributes;
 	pthread_attr_init(&thread_attributes);
 	pthread_attr_setdetachstate(&thread_attributes, PTHREAD_CREATE_JOINABLE);
-
-	// parse arguments
-	parse_arguments(argc, argv, functionality, stream);
 
 	ThreadArgs thread_args;
 	thread_args.count = argc-1;
@@ -306,7 +304,7 @@ void *transformer2(void *args) {
 		char *data = buffer_1[out_1];
 
 		if (data == NULL) break; // EOF signal
-					 //
+
 		char local_data[256];
 		strcpy(local_data, data);
 		free(data);
@@ -682,21 +680,25 @@ void parse_arguments(int argc, char *argv[], char functionality[][32], char stre
 	int func_len;
 
 	for (int i = 1; i < argc; i++) {
-		// Find the colon delimiter
-		colon_ptr = strchr(argv[i], ':');
+		colon_ptr = strchr(argv[i], ':'); // Find the colon delimiter
 		
 		if (colon_ptr == NULL) {
 			fprintf(stderr, "Error: Could not find colon: '%s'. Expected format: functionality:stream_name\n", argv[i]);
 			exit(1);
 		}
 		
-		// grab length of functionality and copy
-		func_len = colon_ptr - argv[i];
+		func_len = colon_ptr - argv[i]; // grab length of functionality and copy
 		strncpy(functionality[i-1], argv[i], func_len);
 		functionality[i-1][func_len] = '\0';
-		
-		// copy stream after colon, already null terminated
-		strcpy(stream[i-1], colon_ptr + 1);
+		strcpy(stream[i-1], colon_ptr + 1); // copy stream after colon, already null terminated
+
+		// check if functionality is being directed to multiple streams
+		for (size_t j = 0; j < i-1; j++) {
+			if (strcmp(functionality[j], functionality[i-1]) == 0 && strcmp(stream[j], stream[i-1]) != 0) {
+				fprintf(stdout, "Error: %s is directed to more than one output stream!\n", functionality[j]);
+				exit(1);
+			}
+		}
 	}
 }
 
