@@ -303,7 +303,10 @@ void *transformer2(void *args) {
 
 		char *data = buffer_1[out_1];
 
-		if (data == NULL) break; // EOF signal
+		if (data == NULL) {
+			pthread_mutex_unlock(&mtx_1);
+			break; // EOF signal
+		}
 
 		char local_data[256];
 		strcpy(local_data, data);
@@ -515,7 +518,10 @@ void *transformer3(void *args) {
 
 		char *data = buffer_2[out_2];
 
-		if (data == NULL) break; // EOF signal
+		if (data == NULL) {
+			pthread_mutex_unlock(&mtx_2);
+			break; // EOF signal
+		}
 
 		char local_data[256];
 		strcpy(local_data, data);
