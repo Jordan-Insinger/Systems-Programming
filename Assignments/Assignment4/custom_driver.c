@@ -10,12 +10,15 @@ MODULE_AUTHOR("Jordan Insinger");
 MODULE_DESCRIPTION("ASP Assignment 4 - Character Device Driver");
 
 #define MYDEV_NAME "asp_cdrv"
+#define ASP_IOC_MAGIC 'k'
+#define ASP_CLEAR_BUF _IO(ASP_IOC_MAGIC, 0)
 
 struct asp_cdev {
 	struct cdev cdev;
-	char* ramdisk;
-	struct semaphore sem;
 	int devNo;
+	char* ramdisk;
+    size_t buffer_size;
+	struct semaphore sem;
 };
 
 // module parameters
@@ -40,17 +43,19 @@ static const struct file_operations asp_fops = {
     .llseek = asp_llseek,
 };
 
-static int asp_open(struct inode *inode, struct file *filp);
-static ssize_t asp_read(struct file* filp, char __user*buf, size_t count, loff_t *f_pos);
+static int asp_open(struct inode *inode, struct file* filp);
+static ssize_t asp_read(struct file* filp, char __user*buf, size_t count, loff_t* f_pos);
 static ssize_t asp_write(struct file* filp, const char __user* buf, size_t count, loff_t* f_pos);
-static int asp_release(stuct inode *inode, struct file *filp);
+static int asp_release(struct inode *inode, struct file* filp);
 static void asp_setup_cdev(struct asp_cdev* dev, int index);
+static int asp_ioctl(struct file* filp, unsigned int cmd, unsigned long arg);
+static loff_t asp_llseek(struct file* filp, loff_t off, int whence);
 static int __exit asp_exit(void);
 static int __init asp_init(void);
 
-static int asp_open(struct inode *inode, struct file *filp) {
+static int asp_open(struct inode* inode, struct file* filp) {
 
-	struct asp_cdev *dev;
+	struct asp_cdev* dev;
 
 	dev = container_of(inode->i_cdev, struct asp_cdev, cdev);
 	filp->private_data = dev;
@@ -70,11 +75,51 @@ static ssize_t asp_write(struct file* filp, const char __user* buf, size_t count
 	return 0;
 }
 
-static int asp_release(stuct inode *inode, struct file *filp) {
+static int asp_release(struct inode *inode, struct file *filp) {
 	return 0;
 }
 
-static int __exit asp_exit(void) {
+static loff_t asp_llseek(struct file* filp, loff_t off, int whence) {
+    struct asp_cdev* dev = filp->private_data;
+    loff_t new_pos;
+
+    switch (whence) {
+        case SEEK_SET:
+            new_pos = off;
+            break;
+        case SEEK_CUR:
+            new_pos = filp->f_pos + off;
+            break;
+        case SEEK_END:
+            new_pos = dev->buffer_size + off; 
+            break;
+        default:
+            return -EINVAL;
+    }
+    
+    if (new_pos < 0)
+        return -EINVAL;
+    filp->f_pos = new_pos;
+    return new_pos;
+}
+
+static int asp_ioctl(struct file* filp, unsigned int cmd, unsigned long arg) {
+
+    struct asp_cdev* dev = filp->private_data;
+
+    switch (cmd) {
+        case ASP_CLEAR_BUF: 
+            memset(dev->ramdisk, 0, sizeof(dev->buffer_size));
+            filp->f_pos = 0;
+            pr_info("asp_driver: cdev%d buffer cleared", dev->devNo);
+            return 0;
+
+        default: 
+            return -ENOTTY;
+    }
+}
+
+static void __exit asp_exit(void) {
     for(int i = 0; i < num_devices; i++) {
         kfree(devices[i].ramdisk);
         devices[i].ramdisk = NULL;
@@ -108,7 +153,7 @@ static int __init asp_init(void) {
 
     if (!devices) {
         pr_err("asp_driver: kcalloc failed for devices");
-        result = -ENOMEM
+        result = -ENOMEM;
         goto fail;
     }
 
@@ -131,6 +176,7 @@ static void asp_setup_cdev(struct asp_cdev* dev, int index) {
 
     // allocate ramdisk
     dev->ramdisk = kzalloc(size * PAGE_SIZE, GFP_KERNEL);
+    dev->buffer_size = size * PAGE_SIZE;
     
     // setup semaphore - may need to change initial val for semaphores
     sema_init(&dev->sem, 1);
