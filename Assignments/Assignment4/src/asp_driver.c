@@ -4,6 +4,9 @@
 #include <linux/init.h>		/* module_init, module_exit */
 #include <linux/slab.h>		/* kmalloc */
 #include <linux/cdev.h>		/* cdev utilities */
+#include <linux/kernel.h>
+#include <linux/device.h>
+#include <linux/ioctl.h>
 #include <linux/semaphore.h>
 
 MODULE_LICENSE("GPL");
@@ -11,14 +14,15 @@ MODULE_AUTHOR("Jordan Insinger");
 MODULE_DESCRIPTION("ASP Assignment 4 - Character Device Driver");
 
 #define MYDEV_NAME "asp_cdrv"
-#define ASP_IOC_MAGIC 'k'
-#define ASP_CLEAR_BUF _IO(ASP_IOC_MAGIC, 0)
+#define ASP_IOC_MAGIC 'Z'
+#define ASP_CLEAR_BUF _IO(ASP_IOC_MAGIC, 1)
 
 struct asp_cdev {
 	struct cdev cdev;
 	int devNo;
 	char* ramdisk;
-    size_t buffer_size;
+	size_t buffer_size;
+	size_t data_size;
 	struct semaphore sem;
 };
 
@@ -35,16 +39,6 @@ module_param(num_devices, int, S_IRUGO);
 static struct asp_cdev* devices;
 static struct class* asp_class; // for creating device nodes
 
-static const struct file_operations asp_fops = {
-	.owner = THIS_MODULE,
-	.open = asp_open,
-	.read = asp_read,
-	.write = asp_write,
-	.release = asp_release,
-    .unlocked_ioctl = asp_ioctl,
-    .llseek = asp_llseek,
-};
-
 static int asp_open(struct inode *inode, struct file* filp);
 static ssize_t asp_read(struct file* filp, char __user*buf, size_t count, loff_t* f_pos);
 static ssize_t asp_write(struct file* filp, const char __user* buf, size_t count, loff_t* f_pos);
@@ -54,6 +48,17 @@ static long asp_ioctl(struct file* filp, unsigned int cmd, unsigned long arg);
 static loff_t asp_llseek(struct file* filp, loff_t off, int whence);
 static void __exit asp_exit(void);
 static int __init asp_init(void);
+
+static const struct file_operations asp_fops = {
+	.owner = THIS_MODULE,
+	.open = asp_open,
+	.read = asp_read,
+	.write = asp_write,
+	.release = asp_release,
+	.unlocked_ioctl = asp_ioctl,
+	.llseek = asp_llseek,
+};
+
 
 static int asp_open(struct inode* inode, struct file* filp) {
 
@@ -127,6 +132,10 @@ static ssize_t asp_write(struct file* filp, const char __user* buf, size_t count
     *f_pos += count;
     ret_val = count;
 
+    if ((size_t)*f_pos > dev->data_size)
+	dev->data_size = *f_pos;
+
+    pr_info("asp_driver: after write, data_size=%zu", dev->data_size);
 out:
     up(&dev->sem);
     return ret_val;
@@ -151,7 +160,7 @@ static loff_t asp_llseek(struct file* filp, loff_t off, int whence) {
             new_pos = filp->f_pos + off;
             break;
         case SEEK_END:
-            new_pos = dev->buffer_size + off; 
+            new_pos = dev->data_size + off; 
             break;
         default:
             up(&dev->sem);
@@ -193,6 +202,7 @@ static long asp_ioctl(struct file* filp, unsigned int cmd, unsigned long arg) {
 
             memset(dev->ramdisk, 0, dev->buffer_size);
             filp->f_pos = 0;
+	    dev->data_size = 0;
             up(&dev->sem);
 
             pr_info("asp_driver: cdev%d buffer cleared", dev->devNo);
@@ -241,7 +251,7 @@ static int __init asp_init(void) {
         return result;
     }
 
-    asp_class = class_create(THIS_MODULE, "asp_class");
+    asp_class = class_create("asp_class");
     
     // allocate devices
     devices = kcalloc(num_devices, sizeof(struct asp_cdev), GFP_KERNEL);
@@ -274,6 +284,7 @@ static int asp_setup_cdev(struct asp_cdev* dev, int index) {
     // allocate ramdisk
     dev->ramdisk = kzalloc(size * PAGE_SIZE, GFP_KERNEL);
     dev->buffer_size = size * PAGE_SIZE;
+    dev->data_size = 0;
     
     // setup semaphore - may need to change initial val for semaphores
     sema_init(&dev->sem, 1);
@@ -292,10 +303,10 @@ static int asp_setup_cdev(struct asp_cdev* dev, int index) {
         return err;
     }
 
-    /* Create the /dev/mycdevX node with udev */
+    /* Create the /dev/mycdrvX node with udev */
     if (IS_ERR(device_create(asp_class, NULL, dev_id, NULL,
-                             "mycdev%d", index))) {
-        pr_err("asp_driver: device_create failed for mycdev%d\n", index);
+                             "mycdrv%d", index))) {
+        pr_err("asp_driver: device_create failed for mycdrv%d\n", index);
         cdev_del(&dev->cdev);
         kfree(dev->ramdisk);
         dev->ramdisk = NULL;
