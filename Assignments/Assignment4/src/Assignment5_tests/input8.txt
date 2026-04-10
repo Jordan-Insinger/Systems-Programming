@@ -1,0 +1,4 @@
+device 0 c
+device 0 w Jordan
+device 0 l E -5
+device 0 r 5

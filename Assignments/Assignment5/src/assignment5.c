@@ -46,7 +46,11 @@ int e2_open(struct inode *inode, struct file *filp)
     if (devc->mode == MODE1) {
         devc->count1++;
         up(&devc->sem1);
+	printk(KERN_INFO "Opening device, count: %d", &devc->count1);
         down_interruptible(&devc->sem2);
+
+	// -------
+	printk(KERN_INFO "Device: opened, sem2 acquired.\n");
         return 0;
     }
     else if (devc->mode == MODE2) {
@@ -147,6 +151,9 @@ static long e2_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 	
     switch(cmd) {
        case E2_IOCMODE2:
+	  // ---------------------------
+	  printk(KERN_INFO "IOCTL: called, Attempting to switch to mode 2.\n");
+	  // ---------------------------
           down_interruptible(&(devc->sem1));
           if (devc->mode == MODE2) {
              up(&devc->sem1);
@@ -164,6 +171,9 @@ static long e2_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
           devc->count2++;
           up(&devc->sem2);
           up(&devc->sem1);
+	  // ---------------------------
+	  printk(KERN_INFO "IOCTL: finished, switched to mode 2.\n");
+	  // ---------------------------
           break;			
        case E2_IOCMODE1:
           down_interruptible(&devc->sem1);
@@ -222,6 +232,9 @@ static int __init my_init (void) {
     sema_init(&dev->sem1, 1);
     sema_init(&dev->sem2, 1);
     ret = cdev_add(&dev->cdev, dev_no, 1);
+    // ---------------------------
+    printk(KERN_INFO "mycdrv: Loaded device driver\n");
+    // ---------------------------
     if (ret < 0 ) {
        printk(KERN_INFO "Unable to register cdev");
        return ret;
