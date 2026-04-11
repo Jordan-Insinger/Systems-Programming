@@ -27,7 +27,7 @@ void* test1_ioctl(void* arg) {
     return NULL;
 }
 
-void* test1_open(void* arg) {
+void* t1_open_ioctl(void* arg) {
     char fname[64];
     snprintf(fname, sizeof(fname), "/dev/%s", devname);
 
@@ -42,7 +42,7 @@ void* test1_open(void* arg) {
     return NULL;
 }
 
-void* test2_open(void* arg) {
+void* t2_open(void* arg) {
     char fname[64];
     snprintf(fname, sizeof(fname), "/dev/%s", devname);
 
@@ -59,8 +59,8 @@ void* test2_open(void* arg) {
 int main() {
     pthread_t t1, t2;
 
-    pthread_create(&t1, NULL, test1_open, NULL);
-    pthread_create(&t2, NULL, test2_open, NULL);
+    pthread_create(&t1, NULL, t1_open_ioctl, NULL);
+    pthread_create(&t2, NULL, t2_open, NULL);
 
     pthread_join(t1, NULL);
     pthread_join(t2, NULL);

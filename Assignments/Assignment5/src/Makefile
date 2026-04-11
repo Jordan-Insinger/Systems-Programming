@@ -7,7 +7,8 @@ all:
 	$(MAKE) -C $(KERNEL_DIR) M=$(shell pwd) modules
 	
 app: 
-	gcc -o testapp test_deadlocks.c
+	gcc -o app1 deadlock1.c
+	gcc -o app2 deadlock2.c
 
 clean:
 	rm -rf *.o *.ko *.mod.* *.symvers *.order devuserapp
