@@ -17,17 +17,7 @@
 #define MODE1 1
 #define MODE2 2
 
-void* test1_ioctl(void* arg) {
-
-    int fd = *(int*)arg;
-    
-    long ret = ioctl(fd, E2_IOCMODE2);
-    printf("(Thread 1): ioctl(MODE2) returned %ld\n", ret);
-    printf("(Thread 1): completed.\n");
-    return NULL;
-}
-
-void* t1_open_ioctl(void* arg) {
+void* t1_func(void* arg) {
     char fname[64];
     snprintf(fname, sizeof(fname), "/dev/%s", devname);
 
@@ -38,11 +28,14 @@ void* t1_open_ioctl(void* arg) {
     }
 
     sleep(2);
-    test1_ioctl(&fd);
+
+    long ret = ioctl(fd, E2_IOCMODE2);
+    printf("(Thread 1): ioctl(MODE2) returned %ld\n", ret);
+    printf("(Thread 1): completed.\n");
     return NULL;
 }
 
-void* t2_open(void* arg) {
+void* t2_func(void* arg) {
     char fname[64];
     snprintf(fname, sizeof(fname), "/dev/%s", devname);
 
@@ -59,8 +52,8 @@ void* t2_open(void* arg) {
 int main() {
     pthread_t t1, t2;
 
-    pthread_create(&t1, NULL, t1_open_ioctl, NULL);
-    pthread_create(&t2, NULL, t2_open, NULL);
+    pthread_create(&t1, NULL, t1_func, NULL);
+    pthread_create(&t2, NULL, t2_func, NULL);
 
     pthread_join(t1, NULL);
     pthread_join(t2, NULL);
