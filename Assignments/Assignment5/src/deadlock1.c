@@ -21,7 +21,7 @@ void* t1_func(void* arg) {
     char fname[64];
     snprintf(fname, sizeof(fname), "/dev/%s", devname);
 
-    printf("Thread 1): opening.");
+    printf("Thread 1): opening.\n");
     int fd = open(fname, O_RDWR);
     if (fd == -1) {
         fprintf(stderr, "File %s was not opened.\n", fname);
@@ -30,7 +30,7 @@ void* t1_func(void* arg) {
 
     sleep(2);
 
-    printf("(Thread 1): calling ioctl(MODE2).");
+    printf("(Thread 1): calling ioctl(MODE2).\n");
     long ret = ioctl(fd, E2_IOCMODE2);
     printf("(Thread 1): ioctl(MODE2) returned %ld\n", ret);
     printf("(Thread 1): completed.\n");
@@ -41,7 +41,7 @@ void* t2_func(void* arg) {
     char fname[64];
     snprintf(fname, sizeof(fname), "/dev/%s", devname);
 
-    printf("Thread 2): opening.");
+    printf("Thread 2): opening.\n");
     int fd = open(fname, O_RDWR);
     if (fd == -1) {
         fprintf(stderr, "File %s was not opened.\n", fname);
