@@ -42,7 +42,7 @@ void* t1_func(void* arg) {
 }
 
 void* t2_func(void* arg) {
-    printf("Thread 2): entered thread 3 func.\n");
+    printf("(Thread 2): entered thread 2 func.\n");
     char fname[64];
     snprintf(fname, sizeof(fname), "/dev/%s", devname);
 
@@ -63,6 +63,7 @@ void* t2_func(void* arg) {
 }
 
 void* t3_func(void* arg) {
+    printf("(Thread 3): entered thread 3 func.\n");
     char fname[64];
     snprintf(fname, sizeof(fname), "/dev/%s", devname);
 

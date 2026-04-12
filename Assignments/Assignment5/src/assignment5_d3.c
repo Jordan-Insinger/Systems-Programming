@@ -84,6 +84,9 @@ int e2_release(struct inode *inode, struct file *filp)
 
 static ssize_t e2_read (struct file *filp, char __user *buf, size_t count, loff_t *f_pos)
 {
+  // ---------------------------
+  printk(KERN_INFO "read called.\n");
+  // ---------------------------
     struct e2_dev *devc = filp->private_data;
     ssize_t ret = 0;
     down_interruptible(&devc->sem1);
@@ -106,6 +109,9 @@ static ssize_t e2_read (struct file *filp, char __user *buf, size_t count, loff_
        *f_pos += ret;
        up(&devc->sem1);
     }
+    // ---------------------------
+    printk(KERN_INFO "read finished.\n");
+    // ---------------------------
     return ret;
 }
 
@@ -179,6 +185,9 @@ static long e2_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 	  // ---------------------------
           break;			
        case E2_IOCMODE1:
+	  // ---------------------------
+	  printk(KERN_INFO "IOCTL: called, Attempting to switch to mode 1.\n");
+	  // ---------------------------
           down_interruptible(&devc->sem1);
           if (devc->mode == MODE1) {
              up(&devc->sem1);
@@ -196,6 +205,9 @@ static long e2_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
           devc->count1++;
           down_interruptible(&devc->sem2);
           up(&devc->sem1);
+	  // ---------------------------
+	  printk(KERN_INFO "IOCTL: finished, switched to mode 1.\n");
+	  // ---------------------------
           break;			
        default :
          pr_info("Unrecognized ioctl command\n");
