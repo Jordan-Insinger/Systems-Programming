@@ -39,39 +39,38 @@ void *t1_func(void *arg) {
     printf("[T1] Opening in MODE1, will hold fd...\n");
     int fd = open_dev();
     printf("[T1] Opened (fd=%d). Sleeping 4s before close.\n", fd);
-    sleep(4);  /* let T2 switch mode before we close */
+    sleep(4);  
     printf("[T1] Closing fd (mode has changed to MODE2 by now).\n");
-    close(fd); /* release() will NOT up(sem2) — MODE2 path taken */
+    close(fd);
     printf("[T1] Done.\n");
     return NULL;
 }
 
 void *t2_func(void *arg) {
-    sleep(1);  /* let T1 open first */
+    sleep(1);
     printf("[T2] Switching to MODE2 via ioctl.\n");
     int fd = open_dev();
     ioctl(fd, E2_IOCMODE2);
     printf("[T2] Switched to MODE2.\n");
-    sleep(6);  /* hold open so mode doesn't flip back */
+    sleep(6);
     close(fd);
     return NULL;
 }
 
 void *t3_func(void *arg) {
-    sleep(2);  /* let T2 switch mode first */
+    sleep(2);
     printf("[T3] Switching back to MODE1.\n");
-    int fd = open_dev();  /* opens in MODE2, fine */
+    int fd = open_dev();
     ioctl(fd, E2_IOCMODE1);
     printf("[T3] Switched back to MODE1.\n");
-    /* Now sem2 was downed by ioctl(MODE1). T4's open will block. */
-    sleep(10); /* never close — sem2 never upped */
+    sleep(10);
     return NULL;
 }
 
 void *t4_func(void *arg) {
-    sleep(3);  /* wait for T1 close + T3 MODE1 switch */
+    sleep(3);
     printf("[T4] Attempting to open in MODE1 — should deadlock.\n");
-    int fd = open_dev(); /* blocks forever on sem2 */
+    int fd = open_dev();
     printf("[T4] Opened (should never print).\n");
     close(fd);
     return NULL;
