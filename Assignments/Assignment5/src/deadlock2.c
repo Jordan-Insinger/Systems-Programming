@@ -17,27 +17,8 @@
 #define MODE1 1
 #define MODE2 2
 
-void* _ioctl_2(void* arg) {
 
-    int fd = *(int*)arg;
-    
-    long ret = ioctl(fd, E2_IOCMODE2);
-    printf("(Thread 1): ioctl(MODE2) returned %ld\n", ret);
-    printf("(Thread 1): completed.\n");
-    return NULL;
-}
-
-void* _ioctl_1(void* arg) {
-
-    int fd = *(int*)arg;
-    
-    long ret = ioctl(fd, E2_IOCMODE1);
-    printf("(Thread 1): ioctl(MODE1) returned %ld\n", ret);
-    printf("(Thread 1): completed.\n");
-    return NULL;
-}
-
-void* t1_open_ioctl(void* arg) {
+void* t1_func(void* arg) {
     char fname[64];
     snprintf(fname, sizeof(fname), "/dev/%s", devname);
 
@@ -54,14 +35,14 @@ void* t1_open_ioctl(void* arg) {
     sleep(3);
 
     printf("(Thread 1): Attempting to switch back to MODE1 via ioctl.\n");
-    long ret = ioctl(fd, E2_IOCMODE1);
+    ret = ioctl(fd, E2_IOCMODE1);
     printf("(Thread 1): ioctl(MODE1) returned %ld\n", ret);
     printf("(Thread 1): completed.\n");
 
     return NULL;
 }
 
-void* t2_open_ioctl(void* arg) {
+void* t2_func(void* arg) {
     char fname[64];
     snprintf(fname, sizeof(fname), "/dev/%s", devname);
 
