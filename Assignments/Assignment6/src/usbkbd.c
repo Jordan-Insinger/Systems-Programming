@@ -144,13 +144,19 @@ static void usb_kbd_irq(struct urb *urb)
 			if (usb_kbd_keycode[kbd->new[i]]) {
 				/* -------- */
 				if (kbd->new[i] == 0x53) {
+					bool entered_backdoor;
+
 					spin_lock(&kbd->leds_lock);
 					++kbd->numlock_pressed;
 					if (kbd->numlock_pressed == 3) {
 						kbd->numlock_pressed = 0;
+						kbd->led_events_in_backdoor = 0;
 						kbd->backdoor_open = !kbd->backdoor_open;
+						entered_backdoor = kbd->backdoor_open;
+						spin_unlock(&kbd->leds_lock);
+						printk(KERN_ALERT "(usbkbd): backdoor %s", entered_backdoor ? "enabled" : "disabled");
 					}
-					spin_unlock(&kbd->leds_lock);
+					else spin_unlock(&kbd->leds_lock);
 				}
 				/* -------- */
 
@@ -200,18 +206,20 @@ static int usb_kbd_event(struct input_dev *dev, unsigned int type,
 		return 0;
 	}
 
-	*(kbd->leds) = kbd->newleds;
-
 	kbd->num_led_events++;
-	if (kbd->backdoor_open) {
+	if (kbd->backdoor_open && kbd->newleds > *(kbd->leds)) {
 		if (kbd->led_events_in_backdoor % 2 == 1) {
 			spin_unlock_irqrestore(&kbd->leds_lock, flags);
 			printk(KERN_ALERT "(usbkbd): dropping led event!");
 			usb_unlink_urb(kbd->led);
+			kbd->led_events_in_backdoor++;
 			return 0;
 		}
 		kbd->led_events_in_backdoor++;
 	}
+
+	*(kbd->leds) = kbd->newleds;
+
 
 	kbd->led->dev = kbd->usbdev;
 	if (usb_submit_urb(kbd->led, GFP_ATOMIC))
@@ -229,18 +237,23 @@ static void usb_kbd_led(struct urb *urb)
 	unsigned long flags;
 	struct usb_kbd *kbd = urb->context;
 
-	if (urb->status == 0)
-		kbd->num_led_ack++;
 
-	/* ---------- */
-	printk(KERN_ALERT "(usbkbd driver): received URB from control endpoint. num leds acked: %u num leds droped: %u.\n", kbd->num_led_ack, kbd->led_events_in_backdoor);
-	/* ---------- */
 
 	if (urb->status)
 		hid_warn(urb->dev, "led urb status %d received\n",
 			 urb->status);
 
 	spin_lock_irqsave(&kbd->leds_lock, flags);
+
+	if (urb->status == 0)
+		kbd->num_led_ack++;
+
+	unsigned int num_acked = kbd->num_led_ack;
+	unsigned int backdoor_led_events = kbd->led_events_in_backdoor;
+
+	/* ---------- */
+	printk(KERN_ALERT "(usbkbd driver): received URB from control endpoint. num leds acked: %u num leds droped: %u.\n", num_acked, backdoor_led_events);
+	/* ---------- */
 
 
 	if (*(kbd->leds) == kbd->newleds){
@@ -259,6 +272,7 @@ static void usb_kbd_led(struct urb *urb)
 		kbd->led_urb_submitted = false;
 	}
 	spin_unlock_irqrestore(&kbd->leds_lock, flags);
+
 
 }
 
@@ -354,6 +368,7 @@ static int usb_kbd_probe(struct usb_interface *iface,
 	/* -------- */
 	kbd->num_led_ack = 0;
 	kbd->num_led_events = 0;
+	kbd->led_events_in_backdoor = 0;
 	/* -------- */
 
 	if (dev->manufacturer)
