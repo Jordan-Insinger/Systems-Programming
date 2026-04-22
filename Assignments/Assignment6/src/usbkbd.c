@@ -100,7 +100,7 @@ struct usb_kbd {
 	bool backdoor_open;
 	unsigned int numlock_pressed;
 	unsigned int num_led_events;
-	unsigned int led_events_in_backdoor;
+	int led_events_in_backdoor;
 	unsigned int led_dropped;
 	unsigned int num_led_ack;
 	/* --------- */
@@ -148,7 +148,7 @@ static void usb_kbd_irq(struct urb *urb)
 					++kbd->numlock_pressed;
 					if (kbd->numlock_pressed == 3) {
 						kbd->numlock_pressed = 0;
-						kbd->led_events_in_backdoor = 0;
+						kbd->led_events_in_backdoor = -1;
 						kbd->backdoor_open = !kbd->backdoor_open;
 						entered_backdoor = kbd->backdoor_open;
 						spin_unlock(&kbd->leds_lock);
@@ -194,20 +194,6 @@ static int usb_kbd_event(struct input_dev *dev, unsigned int type,
 		       (!!test_bit(LED_SCROLLL, dev->led) << 2) | (!!test_bit(LED_CAPSL,   dev->led) << 1) |
 		       (!!test_bit(LED_NUML,    dev->led));
 
-	kbd->num_led_events++;
-	if (kbd->backdoor_open) {
-		if (kbd->led_events_in_backdoor % 2 == 1) {
-			kbd->led_dropped++;
-			kbd->led_events_in_backdoor++;
-
-			spin_unlock_irqrestore(&kbd->leds_lock, flags);
-			printk(KERN_ALERT "(usbkbd): dropping led event!");
-			//*(kbd->leds) = kbd->newleds;
-			usb_unlink_urb(kbd->led);
-			return 0;
-		}
-		kbd->led_events_in_backdoor++;
-	}
 
 	if (kbd->led_urb_submitted){
 		spin_unlock_irqrestore(&kbd->leds_lock, flags);
@@ -219,6 +205,19 @@ static int usb_kbd_event(struct input_dev *dev, unsigned int type,
 		return 0;
 	}
 
+	kbd->num_led_events++;
+	if (kbd->backdoor_open) {
+		if (kbd->led_events_in_backdoor % 2 == 1) {
+			kbd->led_dropped++;
+			kbd->led_events_in_backdoor++;
+
+			spin_unlock_irqrestore(&kbd->leds_lock, flags);
+			printk(KERN_ALERT "(usbkbd): dropping led event!");
+			//usb_unlink_urb(kbd->led);
+			return 0;
+		}
+		kbd->led_events_in_backdoor++;
+	}
 
 	*(kbd->leds) = kbd->newleds;
 
