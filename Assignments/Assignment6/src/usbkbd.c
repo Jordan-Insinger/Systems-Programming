@@ -377,11 +377,6 @@ static int usb_kbd_probe(struct usb_interface *iface,
 	kbd->dev = input_dev;
 	spin_lock_init(&kbd->leds_lock);
 
-	/* -------- */
-	kbd->num_led_ack = 0;
-	kbd->led_events_in_backdoor = 0;
-	/* -------- */
-
 	if (dev->manufacturer)
 		strscpy(kbd->name, dev->manufacturer, sizeof(kbd->name));
 
