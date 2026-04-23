@@ -191,28 +191,32 @@ static int usb_kbd_event(struct input_dev *dev, unsigned int type,
 	spin_lock_irqsave(&kbd->leds_lock, flags);
 
 	unsigned char oldleds = *(kbd->leds);
-	kbd->newleds = (!!test_bit(LED_KANA,    dev->led) << 3) | (!!test_bit(LED_COMPOSE, dev->led) << 3) |
-		       (!!test_bit(LED_SCROLLL, dev->led) << 2) | (!!test_bit(LED_CAPSL,   dev->led) << 1) |
-		       (!!test_bit(LED_NUML,    dev->led));
+	unsigned char newleds_val =
+		(!!test_bit(LED_KANA,    dev->led) << 3) |
+		(!!test_bit(LED_COMPOSE, dev->led) << 3) |
+		(!!test_bit(LED_SCROLLL, dev->led) << 2) |
+		(!!test_bit(LED_CAPSL,   dev->led) << 1) |
+		(!!test_bit(LED_NUML,    dev->led));
 
-	/* backdoor logic */
+	/* Count every LED event (including in-flight/unchanged) for odd/even tracking */
 	if (kbd->backdoor_open) {
 		kbd->led_events_in_backdoor++;
-
-		/* drop every odd-numbered LED event */
-		if (kbd->led_events_in_backdoor % 2 == 1) {
-			kbd->led_dropped++;
+		if (kbd->led_events_in_backdoor % 2 == 1)
 			should_drop = true;
-		}
 	}
 
-	if (kbd->led_urb_submitted){
+	if (kbd->led_urb_submitted) {
+		/* Only queue new state for completion handler if we are NOT dropping */
+		if (!should_drop)
+			kbd->newleds = newleds_val;
 		spin_unlock_irqrestore(&kbd->leds_lock, flags);
 		printk(KERN_ALERT "led in flight, returning.\n");
 		return 0;
 	}
 
-	if (*(kbd->leds) == kbd->newleds){
+	kbd->newleds = newleds_val;
+
+	if (*(kbd->leds) == kbd->newleds) {
 		spin_unlock_irqrestore(&kbd->leds_lock, flags);
 		printk(KERN_ALERT "leds unchanged, returning.\n");
 		return 0;
@@ -227,6 +231,7 @@ static int usb_kbd_event(struct input_dev *dev, unsigned int type,
 		printk(KERN_ALERT "led submitted.\n");
 		kbd->led_urb_submitted = true;
 		if (should_drop) {
+			kbd->led_dropped++;
 			printk(KERN_ALERT "dropping led.\n");
 			spin_unlock_irqrestore(&kbd->leds_lock, flags);
 			usb_unlink_urb(kbd->led);
