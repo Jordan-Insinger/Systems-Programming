@@ -100,8 +100,8 @@ struct usb_kbd {
 	bool backdoor_open;
 	unsigned int numlock_pressed;
 	int led_events_in_backdoor;
-	unsigned int led_dropped;
 	unsigned int num_led_ack;
+	unsigned int num_led_received;
 	/* --------- */
 
 };
@@ -190,31 +190,28 @@ static int usb_kbd_event(struct input_dev *dev, unsigned int type,
 
 	spin_lock_irqsave(&kbd->leds_lock, flags);
 
-	unsigned char oldleds = *(kbd->leds);
 	kbd->newleds = (!!test_bit(LED_KANA,    dev->led) << 3) | (!!test_bit(LED_COMPOSE, dev->led) << 3) |
 		       (!!test_bit(LED_SCROLLL, dev->led) << 2) | (!!test_bit(LED_CAPSL,   dev->led) << 1) |
 		       (!!test_bit(LED_NUML,    dev->led));
 
 	/* backdoor logic */
+	kbd->num_led_received++;
 	if (kbd->backdoor_open) {
 		kbd->led_events_in_backdoor++;
 
 		/* drop every odd-numbered LED event */
 		if (kbd->led_events_in_backdoor % 2 == 1) {
-			kbd->led_dropped++;
 			should_drop = true;
 		}
 	}
 
 	if (kbd->led_urb_submitted){
 		spin_unlock_irqrestore(&kbd->leds_lock, flags);
-		printk(KERN_ALERT "led in flight, returning.\n");
 		return 0;
 	}
 
 	if (*(kbd->leds) == kbd->newleds){
 		spin_unlock_irqrestore(&kbd->leds_lock, flags);
-		printk(KERN_ALERT "leds unchanged, returning.\n");
 		return 0;
 	}
 
@@ -224,16 +221,10 @@ static int usb_kbd_event(struct input_dev *dev, unsigned int type,
 	if (usb_submit_urb(kbd->led, GFP_ATOMIC))
 		pr_err("usb_submit_urb(leds) failed\n");
 	else {
-		printk(KERN_ALERT "led submitted.\n");
 		kbd->led_urb_submitted = true;
 		if (should_drop) {
-			printk(KERN_ALERT "dropping led.\n");
 			spin_unlock_irqrestore(&kbd->leds_lock, flags);
 			usb_unlink_urb(kbd->led);
-
-			spin_lock_irqsave(&kbd->leds_lock, flags);
-			*(kbd->leds) = oldleds;
-			spin_unlock_irqrestore(&kbd->leds_lock, flags);
 			return 0;
 		}
 	}
@@ -247,27 +238,35 @@ static void usb_kbd_led(struct urb *urb)
 {
 	unsigned long flags;
 	struct usb_kbd *kbd = urb->context;
+	unsigned int num_acked;
+	unsigned int num_received;
 
 	if (urb->status) {
 		hid_warn(urb->dev, "led urb status %d received\n",
 			 urb->status);
 
 		spin_lock_irqsave(&kbd->leds_lock, flags);
-		kbd->led_urb_submitted = false;
+		{
+			num_received = kbd->num_led_received;
+			num_acked = kbd->num_led_ack;
+		}
 		spin_unlock_irqrestore(&kbd->leds_lock, flags);
-		return;
+
+		printk(KERN_ALERT "(usbkbd led): num received %u, num acknowledged: %u.\n", num_received, num_acked);
 
 	}
 
-	else { /* urb receiving with no error status */
+	else { /* no error status */
 		spin_lock_irqsave(&kbd->leds_lock, flags);
-		kbd->num_led_ack++;
+		{
+			kbd->num_led_ack++;
+			num_received = kbd->num_led_received;
+			num_acked = kbd->num_led_ack;
+		}
 		spin_unlock_irqrestore(&kbd->leds_lock, flags);
-	}
 
-	unsigned int num_acked = kbd->num_led_ack;
-	unsigned int num_dropped = kbd->led_dropped;
-	printk(KERN_ALERT "(usbkbd led): num leds acked: %u num leds droped: %u.\n", num_acked, num_dropped);
+		printk(KERN_ALERT "(usbkbd led): num received %u, num acknowledged: %u.\n", num_received, num_acked);
+	}
 
 	spin_lock_irqsave(&kbd->leds_lock, flags);
 
