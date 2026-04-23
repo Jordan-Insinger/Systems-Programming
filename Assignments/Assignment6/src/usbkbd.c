@@ -190,7 +190,6 @@ static int usb_kbd_event(struct input_dev *dev, unsigned int type,
 
 	spin_lock_irqsave(&kbd->leds_lock, flags);
 
-	unsigned char oldleds = *(kbd->leds);
 	unsigned char newleds_val =
 		(!!test_bit(LED_KANA,    dev->led) << 3) |
 		(!!test_bit(LED_COMPOSE, dev->led) << 3) |
@@ -235,10 +234,6 @@ static int usb_kbd_event(struct input_dev *dev, unsigned int type,
 			printk(KERN_ALERT "dropping led.\n");
 			spin_unlock_irqrestore(&kbd->leds_lock, flags);
 			usb_unlink_urb(kbd->led);
-
-			spin_lock_irqsave(&kbd->leds_lock, flags);
-			*(kbd->leds) = oldleds;
-			spin_unlock_irqrestore(&kbd->leds_lock, flags);
 			return 0;
 		}
 	}
