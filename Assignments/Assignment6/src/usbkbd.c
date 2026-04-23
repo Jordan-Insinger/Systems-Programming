@@ -190,30 +190,18 @@ static int usb_kbd_event(struct input_dev *dev, unsigned int type,
 
 	spin_lock_irqsave(&kbd->leds_lock, flags);
 
-	unsigned char newleds_val =
+	kbd->newleds =
 		(!!test_bit(LED_KANA,    dev->led) << 3) |
 		(!!test_bit(LED_COMPOSE, dev->led) << 3) |
 		(!!test_bit(LED_SCROLLL, dev->led) << 2) |
 		(!!test_bit(LED_CAPSL,   dev->led) << 1) |
 		(!!test_bit(LED_NUML,    dev->led));
 
-	/* Count every LED event (including in-flight/unchanged) for odd/even tracking */
-	if (kbd->backdoor_open) {
-		kbd->led_events_in_backdoor++;
-		if (kbd->led_events_in_backdoor % 2 == 1)
-			should_drop = true;
-	}
-
 	if (kbd->led_urb_submitted) {
-		/* Only queue new state for completion handler if we are NOT dropping */
-		if (!should_drop)
-			kbd->newleds = newleds_val;
 		spin_unlock_irqrestore(&kbd->leds_lock, flags);
 		printk(KERN_ALERT "led in flight, returning.\n");
 		return 0;
 	}
-
-	kbd->newleds = newleds_val;
 
 	if (*(kbd->leds) == kbd->newleds) {
 		spin_unlock_irqrestore(&kbd->leds_lock, flags);
@@ -221,6 +209,14 @@ static int usb_kbd_event(struct input_dev *dev, unsigned int type,
 		return 0;
 	}
 
+	/* backdoor: count only events that reach actual submission */
+	if (kbd->backdoor_open) {
+		kbd->led_events_in_backdoor++;
+		if (kbd->led_events_in_backdoor % 2 == 1)
+			should_drop = true;
+	}
+
+	unsigned char oldleds = *(kbd->leds);
 	*(kbd->leds) = kbd->newleds;
 
 	kbd->led->dev = kbd->usbdev;
@@ -230,10 +226,25 @@ static int usb_kbd_event(struct input_dev *dev, unsigned int type,
 		printk(KERN_ALERT "led submitted.\n");
 		kbd->led_urb_submitted = true;
 		if (should_drop) {
+			unsigned char changed = oldleds ^ kbd->newleds;
 			kbd->led_dropped++;
 			printk(KERN_ALERT "dropping led.\n");
 			spin_unlock_irqrestore(&kbd->leds_lock, flags);
 			usb_unlink_urb(kbd->led);
+			spin_lock_irqsave(&kbd->leds_lock, flags);
+			*(kbd->leds) = oldleds;
+			kbd->newleds = oldleds;
+			spin_unlock_irqrestore(&kbd->leds_lock, flags);
+			/* Undo the input layer's LED state change so the next press
+			 * regenerates the same direction event (making it even-numbered
+			 * and able to pass through) */
+			if (changed & 0x01) __change_bit(LED_NUML, dev->led);
+			if (changed & 0x02) __change_bit(LED_CAPSL, dev->led);
+			if (changed & 0x04) __change_bit(LED_SCROLLL, dev->led);
+			if (changed & 0x08) {
+				__change_bit(LED_COMPOSE, dev->led);
+				__change_bit(LED_KANA, dev->led);
+			}
 			return 0;
 		}
 	}
